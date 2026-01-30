@@ -1,98 +1,209 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  Pressable,
+  TextInput,
+  Modal,
+  Alert,
+  ActivityIndicator,
+  Keyboard,
+} from "react-native";
+import { useEffect, useState, useCallback } from "react";
+import { init, getAllLogs, insertLog, calculateStreak } from "../../src/db/database";
+import { useFocusEffect } from "expo-router";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+function fmtDate(d = new Date()) {
+  return d.toISOString().split("T")[0];
+}
 
-export default function HomeScreen() {
+function Fab({ onPress }: { onPress: () => void }) {
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
-
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    <Pressable
+      onPress={onPress}
+      style={{
+        position: "absolute",
+        bottom: 30,
+        alignSelf: "center",
+        backgroundColor: "#4ADE80",
+        width: 64,
+        height: 64,
+        borderRadius: 32,
+        alignItems: "center",
+        justifyContent: "center",
+        elevation: 6,
+      }}
+    >
+      <Text style={{ fontSize: 36, color: "#0F0F0F", marginBottom: 4 }}>+</Text>
+    </Pressable>
   );
 }
 
-const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
-  },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
-  },
-});
+function LogModal({
+  visible,
+  onClose,
+  onSaved,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [w, setW] = useState("");
+  const [bf, setBf] = useState("");
+  const [mm, setMm] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const clear = () => {
+    setW("");
+    setBf("");
+    setMm("");
+  };
+
+  const save = async () => {
+    if (!w || !bf || !mm) {
+      Alert.alert("Fill all fields");
+      return;
+    }
+    Keyboard.dismiss();
+    setBusy(true);
+    try {
+      const today = fmtDate();
+      const rows = await getAllLogs();
+      if (rows.find((r: any) => r.date === today)) {
+        Alert.alert("Already logged today");
+        setBusy(false);
+        return;
+      }
+      await insertLog(today, parseFloat(w), parseFloat(bf), parseFloat(mm));
+      clear();
+      onSaved();
+      onClose();
+    } catch (e) {
+      Alert.alert("Save failed");
+      console.log("LOG_SAVE_ERR", e);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" transparent>
+      <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }}>
+        <View
+          style={{
+            backgroundColor: "#0F0F0F",
+            padding: 24,
+            borderTopLeftRadius: 16,
+            borderTopRightRadius: 16,
+          }}
+        >
+          <Text style={{ color: "#EAEAEA", fontSize: 22 }}>Log Today</Text>
+
+          <TextInput
+            placeholder="Weight (kg)"
+            placeholderTextColor="#777"
+            value={w}
+            onChangeText={setW}
+            keyboardType="decimal-pad"
+            style={{ color: "#EAEAEA", borderBottomWidth: 1, borderBottomColor: "#444", marginTop: 20 }}
+          />
+
+          <TextInput
+            placeholder="Body fat %"
+            placeholderTextColor="#777"
+            value={bf}
+            onChangeText={setBf}
+            keyboardType="decimal-pad"
+            style={{ color: "#EAEAEA", borderBottomWidth: 1, borderBottomColor: "#444", marginTop: 20 }}
+          />
+
+          <TextInput
+            placeholder="Muscle mass"
+            placeholderTextColor="#777"
+            value={mm}
+            onChangeText={setMm}
+            keyboardType="decimal-pad"
+            style={{ color: "#EAEAEA", borderBottomWidth: 1, borderBottomColor: "#444", marginTop: 20 }}
+          />
+
+          <Pressable
+            onPress={save}
+            disabled={busy}
+            style={{
+              marginTop: 30,
+              backgroundColor: busy ? "#2aa36a" : "#4ADE80",
+              paddingVertical: 14,
+              borderRadius: 8,
+            }}
+          >
+            {busy ? (
+              <ActivityIndicator color="#0F0F0F" />
+            ) : (
+              <Text style={{ textAlign: "center", color: "#0F0F0F", fontSize: 16, fontWeight: "600" }}>Save</Text>
+            )}
+          </Pressable>
+
+          <Pressable onPress={onClose} style={{ marginTop: 12 }}>
+            <Text style={{ color: "#888", textAlign: "center" }}>Cancel</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+export default function Home() {
+  const [count, setCount] = useState(0);
+  const [open, setOpen] = useState(false);
+  const [streak, setStreak] = useState(0);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = async () => {
+    try {
+      const rows = await getAllLogs();
+      setCount(rows.length);
+      setStreak(calculateStreak(rows));
+    } catch (e) {
+      console.log("REFRESH_ERR", e);
+    }
+  };
+
+  useEffect(() => {
+    (async () => {
+      await init();
+      await refresh();
+      setLoading(false);
+    })();
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [])
+  );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: "#0F0F0F" }}>
+      <View style={{ padding: 24 }}>
+        <Text style={{ color: "#EAEAEA", fontSize: 26 }}>Locked In 🔒</Text>
+
+        <Text style={{ color: "#EAEAEA", fontSize: 18, marginTop: 8 }}>
+          Streak: {streak} day{streak === 1 ? "" : "s"}
+        </Text>
+
+        <Text style={{ color: "#4ADE80", fontSize: 20, marginTop: 16 }}>Days logged: {count}</Text>
+
+        {loading ? <ActivityIndicator style={{ marginTop: 12 }} color="#4ADE80" /> : null}
+      </View>
+
+      <Fab onPress={() => setOpen(true)} />
+
+      <LogModal
+        visible={open}
+        onClose={() => setOpen(false)}
+        onSaved={() => {
+          refresh();
+        }}
+      />
+    </View>
+  );
+}
