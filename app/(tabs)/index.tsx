@@ -9,11 +9,18 @@ import {
   Keyboard,
 } from "react-native";
 import { useEffect, useState, useCallback } from "react";
-import { init, getAllLogs, insertLog, calculateStreak } from "../../src/db/database";
+import { init, getAllLogs, insertLog, calculateStreak, getDayState, DayState } from "../../src/db/database";
 import { useFocusEffect } from "expo-router";
+import * as ImagePicker from "expo-image-picker";
+import { savePhoto } from "../../src/utils/photos";
+
+
 
 function fmtDate(d = new Date()) {
-  return d.toISOString().split("T")[0];
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function Fab({ onPress }: { onPress: () => void }) {
@@ -51,11 +58,38 @@ function LogModal({
   const [bf, setBf] = useState("");
   const [mm, setMm] = useState("");
   const [busy, setBusy] = useState(false);
+  const [photos, setPhotos] = useState<string[]>([]);
+
+  const pickPhoto = async () => {
+  if (photos.length >= 3) {
+    Alert.alert("Max 3 photos per day");
+    return;
+  }
+
+  const result = await ImagePicker.launchImageLibraryAsync({
+    mediaTypes: ["images"],
+    quality: 0.8,
+  });
+
+  if (!result.canceled) {
+    setPhotos(p => [...p, result.assets[0].uri]);
+  }
+};
+
+
+  
 
   const clear = () => {
-    setW("");
-    setBf("");
-    setMm("");
+  setW("");
+  setBf("");
+  setMm("");
+  setPhotos([]);
+};
+
+
+  const close = () => {
+    clear();
+    onClose();
   };
 
   const save = async () => {
@@ -63,23 +97,30 @@ function LogModal({
       Alert.alert("Fill all fields");
       return;
     }
+
     Keyboard.dismiss();
     setBusy(true);
+
     try {
-      const today = fmtDate();
-      const rows = await getAllLogs();
-      if (rows.find((r: any) => r.date === today)) {
-        Alert.alert("Already logged today");
-        setBusy(false);
-        return;
+      const date = fmtDate();
+      const savedPhotos: string[] = [];
+      for (let i = 0; i < photos.length; i++) {
+        const path = await savePhoto(date, photos[i], i);
+        savedPhotos.push(path);
       }
-      await insertLog(today, parseFloat(w), parseFloat(bf), parseFloat(mm));
-      clear();
+
+      await insertLog(
+        date,
+        parseFloat(w),
+        parseFloat(bf),
+        parseFloat(mm),
+        savedPhotos
+      );
       onSaved();
-      onClose();
+      close();
     } catch (e) {
       Alert.alert("Save failed");
-      console.log("LOG_SAVE_ERR", e);
+      console.log(e);
     } finally {
       setBusy(false);
     }
@@ -88,61 +129,31 @@ function LogModal({
   return (
     <Modal visible={visible} animationType="slide" transparent>
       <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.6)", justifyContent: "flex-end" }}>
-        <View
-          style={{
-            backgroundColor: "#0F0F0F",
-            padding: 24,
-            borderTopLeftRadius: 16,
-            borderTopRightRadius: 16,
-          }}
-        >
+        <View style={{ backgroundColor: "#0F0F0F", padding: 24, borderTopLeftRadius: 16, borderTopRightRadius: 16 }}>
           <Text style={{ color: "#EAEAEA", fontSize: 22 }}>Log Today</Text>
 
-          <TextInput
-            placeholder="Weight (kg)"
-            placeholderTextColor="#777"
-            value={w}
-            onChangeText={setW}
-            keyboardType="decimal-pad"
-            style={{ color: "#EAEAEA", borderBottomWidth: 1, borderBottomColor: "#444", marginTop: 20 }}
-          />
-
-          <TextInput
-            placeholder="Body fat %"
-            placeholderTextColor="#777"
-            value={bf}
-            onChangeText={setBf}
-            keyboardType="decimal-pad"
-            style={{ color: "#EAEAEA", borderBottomWidth: 1, borderBottomColor: "#444", marginTop: 20 }}
-          />
-
-          <TextInput
-            placeholder="Muscle mass"
-            placeholderTextColor="#777"
-            value={mm}
-            onChangeText={setMm}
-            keyboardType="decimal-pad"
-            style={{ color: "#EAEAEA", borderBottomWidth: 1, borderBottomColor: "#444", marginTop: 20 }}
-          />
-
-          <Pressable
-            onPress={save}
-            disabled={busy}
-            style={{
-              marginTop: 30,
-              backgroundColor: busy ? "#2aa36a" : "#4ADE80",
-              paddingVertical: 14,
-              borderRadius: 8,
-            }}
-          >
-            {busy ? (
-              <ActivityIndicator color="#0F0F0F" />
-            ) : (
-              <Text style={{ textAlign: "center", color: "#0F0F0F", fontSize: 16, fontWeight: "600" }}>Save</Text>
-            )}
+          <TextInput placeholder="Weight (kg)" placeholderTextColor="#777" value={w} onChangeText={setW} keyboardType="decimal-pad" style={{ color: "#EAEAEA", borderBottomWidth: 1, borderBottomColor: "#444", marginTop: 20 }} />
+          <TextInput placeholder="Body fat %" placeholderTextColor="#777" value={bf} onChangeText={setBf} keyboardType="decimal-pad" style={{ color: "#EAEAEA", borderBottomWidth: 1, borderBottomColor: "#444", marginTop: 20 }} />
+          <TextInput placeholder="Muscle mass" placeholderTextColor="#777" value={mm} onChangeText={setMm} keyboardType="decimal-pad" style={{ color: "#EAEAEA", borderBottomWidth: 1, borderBottomColor: "#444", marginTop: 20 }} />
+          <Pressable onPress={pickPhoto} style={{ marginTop: 20 }}>
+            <Text style={{ color: "#4ADE80" }}>
+              + Add Photo ({photos.length}/3)
+            </Text>
           </Pressable>
 
-          <Pressable onPress={onClose} style={{ marginTop: 12 }}>
+          <View style={{ flexDirection: "row", marginTop: 10 }}>
+            {photos.map((_, i) => (
+              <Text key={i} style={{ color: "#888", marginRight: 8 }}>
+                📷 {i + 1}
+              </Text>
+            ))}
+          </View>
+
+          <Pressable onPress={save} disabled={busy} style={{ marginTop: 30, backgroundColor: "#4ADE80", paddingVertical: 14, borderRadius: 8 }}>
+            {busy ? <ActivityIndicator color="#0F0F0F" /> : <Text style={{ textAlign: "center", color: "#0F0F0F", fontSize: 16, fontWeight: "600" }}>Save</Text>}
+          </Pressable>
+
+          <Pressable onPress={close} style={{ marginTop: 12 }}>
             <Text style={{ color: "#888", textAlign: "center" }}>Cancel</Text>
           </Pressable>
         </View>
@@ -153,19 +164,20 @@ function LogModal({
 
 export default function Home() {
   const [count, setCount] = useState(0);
-  const [open, setOpen] = useState(false);
   const [streak, setStreak] = useState(0);
+  const [dayState, setDayState] = useState<DayState>("no_logs_yet");
+  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  
+
   const refresh = async () => {
-    try {
-      const rows = await getAllLogs();
-      setCount(rows.length);
-      setStreak(calculateStreak(rows));
-    } catch (e) {
-      console.log("REFRESH_ERR", e);
-    }
-  };
+  const rows = await getAllLogs();
+  setCount(rows.length);
+  setStreak(calculateStreak(rows));
+  setDayState(getDayState(rows));
+};
+
 
   useEffect(() => {
     (async () => {
@@ -175,35 +187,34 @@ export default function Home() {
     })();
   }, []);
 
-  useFocusEffect(
-    useCallback(() => {
-      refresh();
-    }, [])
-  );
+  useFocusEffect(useCallback(() => {
+    refresh();
+  }, []));
 
   return (
     <View style={{ flex: 1, backgroundColor: "#0F0F0F" }}>
       <View style={{ padding: 24 }}>
         <Text style={{ color: "#EAEAEA", fontSize: 26 }}>Locked In 🔒</Text>
-
         <Text style={{ color: "#EAEAEA", fontSize: 18, marginTop: 8 }}>
-          Streak: {streak} day{streak === 1 ? "" : "s"}
+          {dayState === "locked_today" && "Locked in today 🔒"}
+          {dayState === "on_streak" && `On a ${streak}-day streak`}
+          {dayState === "missed_yesterday" && "Missed yesterday — streak reset"}
+          {dayState === "no_logs_yet" && "Start your first day"}
         </Text>
 
-        <Text style={{ color: "#4ADE80", fontSize: 20, marginTop: 16 }}>Days logged: {count}</Text>
+{dayState === "missed_yesterday" && (
+  <Text style={{ color: "#F87171", marginTop: 4 }}>
+    Consistency broke — restart today
+  </Text>
+)}
 
-        {loading ? <ActivityIndicator style={{ marginTop: 12 }} color="#4ADE80" /> : null}
+        <Text style={{ color: "#4ADE80", fontSize: 20, marginTop: 16 }}>Days logged: {count}</Text>
+        {loading && <ActivityIndicator style={{ marginTop: 12 }} color="#4ADE80" />}
       </View>
 
       <Fab onPress={() => setOpen(true)} />
 
-      <LogModal
-        visible={open}
-        onClose={() => setOpen(false)}
-        onSaved={() => {
-          refresh();
-        }}
-      />
+      <LogModal visible={open} onClose={() => setOpen(false)} onSaved={refresh} />
     </View>
   );
 }
