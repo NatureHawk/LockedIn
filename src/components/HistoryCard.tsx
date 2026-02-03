@@ -6,7 +6,7 @@ type Props = {
   bodyFat: number;
   muscleMass: number;
   photos?: string[];
-  onPress?: () => void;
+  onPressPhoto?: (index: number) => void;
 };
 
 export default function HistoryCard({
@@ -15,11 +15,10 @@ export default function HistoryCard({
   bodyFat,
   muscleMass,
   photos = [],
-  onPress,
+  onPressPhoto,
 }: Props) {
   return (
-    <Pressable
-      onPress={onPress}
+    <View
       style={{
         backgroundColor: "#1A1A1A",
         borderRadius: 12,
@@ -38,19 +37,23 @@ export default function HistoryCard({
       {photos.length > 0 && (
         <View style={{ flexDirection: "row", marginTop: 10 }}>
           {photos.map((uri, i) => (
-            <Image
+            <Pressable
               key={i}
-              source={{ uri }}
-              style={{
-                width: 64,
-                height: 64,
-                borderRadius: 8,
-                marginRight: 8,
-              }}
-            />
+              onPress={() => onPressPhoto?.(i)}
+              style={{ marginRight: 8 }}
+            >
+              <Image
+                source={{ uri }}
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 8,
+                }}
+              />
+            </Pressable>
           ))}
         </View>
       )}
-    </Pressable>
+    </View>
   );
 }
