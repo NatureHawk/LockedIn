@@ -1,5 +1,6 @@
 // src/db/database.ts
 import { openDatabaseAsync, SQLiteDatabase } from "expo-sqlite";
+import * as SQLite from 'expo-sqlite';
 
 let db: SQLiteDatabase | null = null;
 
@@ -128,4 +129,26 @@ export function getDayState(rows: { date: string }[]): DayState {
   }
 
   return "missed_yesterday";
+}// ... existing code ...
+
+export async function deleteLog(date: string) {
+  // Use 'await' to open the database first
+  const db = await SQLite.openDatabaseAsync("lockedin.db");
+  await db.runAsync("DELETE FROM daily_logs WHERE date = ?", [date]);
+}
+
+export async function updateLog(
+  date: string,
+  weight: number,
+  bodyFat: number,
+  muscleMass: number,
+  photos: string[]
+) {
+  const db = await SQLite.openDatabaseAsync("lockedin.db");
+  await db.runAsync(
+    `UPDATE daily_logs
+     SET weight = ?, bodyFat = ?, muscleMass = ?, photos = ?
+     WHERE date = ?`,
+    [weight, bodyFat, muscleMass, JSON.stringify(photos), date]
+  );
 }

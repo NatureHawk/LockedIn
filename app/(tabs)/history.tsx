@@ -7,13 +7,14 @@ import {
   Pressable,
   Dimensions,
   StyleSheet,
+  Alert,
 } from "react-native";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Picker } from "@react-native-picker/picker";
-import { getAllLogs, init } from "../../src/db/database";
+import { getAllLogs, init, deleteLog } from "../../src/db/database"; // Added deleteLog
 import HistoryCard from "../../src/components/HistoryCard";
-// ✅ VERIFIED PATH: Points correctly to your src/charts folder
 import MetricChart from "../../src/charts/MetricChart"; 
+import LogModal from "../../src/components/LogModal"; // <--- Import Modal
 import { useFocusEffect } from "expo-router";
 
 const { width, height } = Dimensions.get("window");
@@ -29,6 +30,10 @@ export default function History() {
   const [viewerPhotos, setViewerPhotos] = useState<string[]>([]);
   const [viewerIndex, setViewerIndex] = useState(0);
 
+  // EDIT MODAL STATE
+  const [editLog, setEditLog] = useState<any | null>(null);
+  const [isEditOpen, setIsEditOpen] = useState(false);
+
   const openViewer = (photos: string[], index = 0) => {
     if (!photos || photos.length === 0) return;
     setViewerPhotos(photos);
@@ -36,7 +41,6 @@ export default function History() {
     setViewerOpen(true);
   };
 
-  // Scroll to correct photo index when viewer opens
   useEffect(() => {
     if (viewerOpen) {
       requestAnimationFrame(() => {
@@ -51,8 +55,6 @@ export default function History() {
   const load = async () => {
     try {
       const rows = await getAllLogs();
-      
-      // ✅ SORTING: Charts need data sorted by date (Oldest -> Newest)
       const sorted = rows.sort((a: any, b: any) => 
         new Date(a.date).getTime() - new Date(b.date).getTime()
       );
@@ -60,16 +62,9 @@ export default function History() {
       setData(
         sorted.map((r: any) => ({
           ...r,
-          photos:
-            typeof r.photos === "string"
-              ? (() => {
-                  try {
-                    return JSON.parse(r.photos);
-                  } catch {
-                    return [];
-                  }
-                })()
-              : [],
+          photos: typeof r.photos === "string" 
+            ? (() => { try { return JSON.parse(r.photos); } catch { return []; } })() 
+            : [],
         }))
       );
     } catch (e) {
@@ -90,6 +85,27 @@ export default function History() {
       load();
     }, [])
   );
+
+  const handleLongPress = (item: any) => {
+    Alert.alert("Manage Log", `Options for ${item.date}`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Edit",
+        onPress: () => {
+          setEditLog(item);
+          setIsEditOpen(true);
+        },
+      },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          await deleteLog(item.date);
+          load();
+        },
+      },
+    ]);
+  };
 
   if (loading) {
     return (
@@ -118,8 +134,6 @@ export default function History() {
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }}>
-        
-        {/* ✅ CHART SECTION: Only shows if you have more than 1 log */}
         {data.length > 1 ? (
           <View style={{ marginBottom: 24, marginTop: 8 }}>
             <MetricChart data={data} mode={mode} />
@@ -130,7 +144,6 @@ export default function History() {
           </View>
         )}
 
-        {/* ✅ LIST SECTION: Reversed so Newest is at the top */}
         {data.slice().reverse().map((item: any) => ( 
           <HistoryCard
             key={item.date}
@@ -140,9 +153,23 @@ export default function History() {
             muscleMass={item.muscleMass}
             photos={item.photos}
             onPressPhoto={(i) => openViewer(item.photos, i)}
+            onLongPress={() => handleLongPress(item)}
           />
         ))}
       </ScrollView>
+
+      {/* EDIT MODAL - Hidden until "Edit" is pressed */}
+      <LogModal 
+        visible={isEditOpen}
+        onClose={() => {
+          setIsEditOpen(false);
+          setEditLog(null);
+        }}
+        onSaved={() => {
+          load();
+        }}
+        existingLog={editLog}
+      />
 
       {/* PHOTO VIEWER MODAL */}
       <Modal
@@ -152,17 +179,11 @@ export default function History() {
         onRequestClose={() => setViewerOpen(false)}
       >
         <View style={styles.modalBackground}>
-          {/* Backdrop Tap */}
-          <Pressable
-            onPress={() => setViewerOpen(false)}
-            style={StyleSheet.absoluteFill}
-          />
-
+          <Pressable onPress={() => setViewerOpen(false)} style={StyleSheet.absoluteFill} />
           <View style={styles.viewerContainer} pointerEvents="box-none">
             <View style={{ marginTop: 12, alignItems: 'center' }}>
                <Text style={{ color: "#AAA", fontSize: 12 }}>Tap outside image to close</Text>
             </View>
-            
             <ScrollView
               ref={scrollRef}
               horizontal
@@ -176,11 +197,7 @@ export default function History() {
                   onPress={() => setViewerOpen(false)}
                 >
                   <Pressable activeOpacity={1} style={styles.imageWrapper}>
-                    <Image
-                      source={{ uri }}
-                      style={styles.fullImage}
-                      resizeMode="contain"
-                    />
+                    <Image source={{ uri }} style={styles.fullImage} resizeMode="contain" />
                   </Pressable>
                 </Pressable>
               ))}

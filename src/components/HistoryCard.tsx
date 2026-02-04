@@ -7,6 +7,7 @@ type Props = {
   muscleMass: number;
   photos?: string[];
   onPressPhoto?: (index: number) => void;
+  onLongPress?: () => void; // <--- NEW PROP
 };
 
 export default function HistoryCard({
@@ -16,19 +17,25 @@ export default function HistoryCard({
   muscleMass,
   photos = [],
   onPressPhoto,
+  onLongPress, // <--- Destructure it
 }: Props) {
   return (
-    <View
-      style={{
-        backgroundColor: "#1A1A1A",
+    <Pressable
+      onLongPress={onLongPress} // <--- Hook it up
+      delayLongPress={500} // Hold for 0.5s to trigger
+      style={({ pressed }) => ({
+        backgroundColor: pressed ? "#222" : "#1A1A1A", // Visual feedback
         borderRadius: 12,
         padding: 16,
         marginBottom: 12,
-      }}
+      })}
     >
-      <Text style={{ color: "#EAEAEA", fontSize: 16, marginBottom: 6 }}>
-        {date}
-      </Text>
+      <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
+        <Text style={{ color: "#EAEAEA", fontSize: 16, marginBottom: 6 }}>
+          {date}
+        </Text>
+        {/* Optional: Add a tiny icon or text to hint at editability */}
+      </View>
 
       <Text style={{ color: "#AAA" }}>Weight: {weight} kg</Text>
       <Text style={{ color: "#AAA" }}>Body Fat: {bodyFat} %</Text>
@@ -54,6 +61,6 @@ export default function HistoryCard({
           ))}
         </View>
       )}
-    </View>
+    </Pressable>
   );
 }
