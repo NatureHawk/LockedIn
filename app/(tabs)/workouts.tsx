@@ -78,7 +78,9 @@ export default function Workouts() {
 
   const handleOpenNew = () => {
     setEditingId(null);
-    setSelectedExercise(exerciseList[0]);
+    // 🛡️ Force a fallback if exerciseList[0] is missing
+    const defaultEx = exerciseList.length > 0 ? exerciseList[0] : "Bench Press";
+    setSelectedExercise(defaultEx);
     setSets([{ weight: 0, reps: 0 }]);
     setModalVisible(true);
   };

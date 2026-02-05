@@ -100,9 +100,15 @@ export async function deleteLog(date: string) {
 
 export async function addWorkout(date: string, exercise: string, sets: WorkoutSet[]) {
   const db = await SQLite.openDatabaseAsync("lockedin.db");
+  
+  // 🛡️ SANITIZATION: Ensure values are never undefined
+  const safeDate = date || new Date().toISOString().split("T")[0];
+  const safeExercise = exercise || "Unknown Exercise"; 
+  const safeSets = JSON.stringify(sets || []);
+
   await db.runAsync(
     "INSERT INTO workouts (date, exercise, sets) VALUES (?, ?, ?)",
-    [date, exercise, JSON.stringify(sets)]
+    [safeDate, safeExercise, safeSets]
   );
 }
 
