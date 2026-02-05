@@ -89,7 +89,6 @@ export default function Home() {
 
   useEffect(() => {
     (async () => {
-      await init();
       await refresh();
       setLoading(false);
     })();

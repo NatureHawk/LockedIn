@@ -21,36 +21,45 @@ export type DayState =
 
 // --- INIT ---
 export async function init() {
-  const db = await SQLite.openDatabaseAsync("lockedin.db");
+  try {
+    console.log("...Starting Database Init...");
+    const db = await SQLite.openDatabaseAsync("lockedin.db");
 
-  // 1. Daily Logs Table
-  await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS daily_logs (
-      date TEXT PRIMARY KEY NOT NULL,
-      weight REAL,
-      bodyFat REAL,
-      muscleMass REAL,
-      photos TEXT
-    );
-  `);
+    // 1. Daily Logs
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS daily_logs (
+        date TEXT PRIMARY KEY NOT NULL,
+        weight REAL,
+        bodyFat REAL,
+        muscleMass REAL,
+        photos TEXT
+      );
+    `);
 
-  // 2. Settings Table (For Goals)
-  await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS settings (
-      key TEXT PRIMARY KEY NOT NULL,
-      value TEXT
-    );
-  `);
+    // 2. Settings
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY NOT NULL,
+        value TEXT
+      );
+    `);
 
-  // 3. Workouts Table
-  await db.execAsync(`
-    CREATE TABLE IF NOT EXISTS workouts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      date TEXT NOT NULL,
-      exercise TEXT NOT NULL,
-      sets TEXT NOT NULL
-    );
-  `);
+    // 3. Workouts
+    await db.execAsync(`
+      CREATE TABLE IF NOT EXISTS workouts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        exercise TEXT NOT NULL,
+        sets TEXT NOT NULL
+      );
+    `);
+
+    console.log("✅ Database Initialized Successfully");
+    return true;
+  } catch (e) {
+    console.error("❌ Database Init Failed:", e);
+    return false;
+  }
 }
 
 // --- DAILY LOGS FUNCTIONS ---
@@ -63,9 +72,12 @@ export async function insertLog(
   photos: string[]
 ) {
   const db = await SQLite.openDatabaseAsync("lockedin.db");
+  const safeDate = date || new Date().toISOString().split("T")[0];
+  const safePhotos = JSON.stringify(photos || []);
+  
   await db.runAsync(
     "INSERT OR REPLACE INTO daily_logs (date, weight, bodyFat, muscleMass, photos) VALUES (?, ?, ?, ?, ?)",
-    [date, weight, bodyFat, muscleMass, JSON.stringify(photos)]
+    [safeDate, weight || 0, bodyFat || 0, muscleMass || 0, safePhotos]
   );
 }
 
@@ -77,23 +89,27 @@ export async function updateLog(
   photos: string[]
 ) {
   const db = await SQLite.openDatabaseAsync("lockedin.db");
+  const safeDate = date || "";
+  const safePhotos = JSON.stringify(photos || []);
+
   await db.runAsync(
     `UPDATE daily_logs
      SET weight = ?, bodyFat = ?, muscleMass = ?, photos = ?
      WHERE date = ?`,
-    [weight, bodyFat, muscleMass, JSON.stringify(photos), date]
+    [weight || 0, bodyFat || 0, muscleMass || 0, safePhotos, safeDate]
   );
 }
 
 export async function getAllLogs() {
   const db = await SQLite.openDatabaseAsync("lockedin.db");
-  const allRows = await db.getAllAsync("SELECT * FROM daily_logs");
+  // 🛡️ Safety: Pass empty array [] for params
+  const allRows = await db.getAllAsync("SELECT * FROM daily_logs", []);
   return allRows;
 }
 
 export async function deleteLog(date: string) {
   const db = await SQLite.openDatabaseAsync("lockedin.db");
-  await db.runAsync("DELETE FROM daily_logs WHERE date = ?", [date]);
+  await db.runAsync("DELETE FROM daily_logs WHERE date = ?", [date || ""]);
 }
 
 // --- WORKOUT FUNCTIONS ---
@@ -101,9 +117,8 @@ export async function deleteLog(date: string) {
 export async function addWorkout(date: string, exercise: string, sets: WorkoutSet[]) {
   const db = await SQLite.openDatabaseAsync("lockedin.db");
   
-  // 🛡️ SANITIZATION: Ensure values are never undefined
   const safeDate = date || new Date().toISOString().split("T")[0];
-  const safeExercise = exercise || "Unknown Exercise"; 
+  const safeExercise = exercise || "Unknown Exercise";
   const safeSets = JSON.stringify(sets || []);
 
   await db.runAsync(
@@ -114,15 +129,45 @@ export async function addWorkout(date: string, exercise: string, sets: WorkoutSe
 
 export async function getWorkouts(date: string): Promise<WorkoutLog[]> {
   const db = await SQLite.openDatabaseAsync("lockedin.db");
+  const safeDate = date || "";
+
+  // 🛡️ Safety: Ensure safeDate is not null
   const rows: any[] = await db.getAllAsync(
     "SELECT * FROM workouts WHERE date = ?",
-    [date]
+    [safeDate]
   );
   
   return rows.map(row => ({
     ...row,
-    sets: JSON.parse(row.sets)
+    sets: row.sets ? JSON.parse(row.sets) : []
   }));
+}
+
+export async function getAllWorkoutsArray() {
+  const db = await SQLite.openDatabaseAsync("lockedin.db");
+  // 🛡️ Safety: Pass empty array
+  const rows: any[] = await db.getAllAsync("SELECT * FROM workouts ORDER BY date ASC", []);
+  
+  return rows.map(row => ({
+    ...row,
+    sets: row.sets ? JSON.parse(row.sets) : []
+  }));
+}
+
+export async function getUniqueExercises(): Promise<string[]> {
+  const db = await SQLite.openDatabaseAsync("lockedin.db");
+  // 🛡️ Safety: Pass empty array
+  const rows: any[] = await db.getAllAsync("SELECT DISTINCT exercise FROM workouts", []);
+  return rows.map(r => r.exercise).filter(e => e); 
+}
+
+export async function updateWorkout(id: number, sets: WorkoutSet[]) {
+  const db = await SQLite.openDatabaseAsync("lockedin.db");
+  const safeSets = JSON.stringify(sets || []);
+  await db.runAsync(
+    "UPDATE workouts SET sets = ? WHERE id = ?",
+    [safeSets, id]
+  );
 }
 
 export async function deleteWorkout(id: number) {
@@ -136,7 +181,7 @@ export async function saveSetting(key: string, value: string) {
   const db = await SQLite.openDatabaseAsync("lockedin.db");
   await db.runAsync(
     `INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)`,
-    [key, value]
+    [key || "", value || ""]
   );
 }
 
@@ -144,7 +189,7 @@ export async function getSetting(key: string): Promise<string | null> {
   const db = await SQLite.openDatabaseAsync("lockedin.db");
   const result: any = await db.getFirstAsync(
     `SELECT value FROM settings WHERE key = ?`,
-    [key]
+    [key || ""]
   );
   return result ? result.value : null;
 }
@@ -163,7 +208,6 @@ export function calculateStreak(logs: any[]) {
   yesterday.setDate(yesterday.getDate() - 1);
   const yStr = yesterday.toISOString().split("T")[0];
 
-  // If no log today or yesterday, streak is 0 (unless we just started)
   if (sorted[0] !== today && sorted[0] !== yStr) {
     return 0;
   }
@@ -198,31 +242,4 @@ export function getDayState(logs: any[]): DayState {
   if (logs.length > 0) return "missed_yesterday";
 
   return "no_logs_yet";
-}
-// Add to bottom of src/db/database.ts
-export async function updateWorkout(id: number, sets: WorkoutSet[]) {
-  const db = await SQLite.openDatabaseAsync("lockedin.db");
-  await db.runAsync(
-    "UPDATE workouts SET sets = ? WHERE id = ?",
-    [JSON.stringify(sets), id]
-  );
-}
-// Add to bottom of src/db/database.ts
-
-export async function getAllWorkoutsArray() {
-  const db = await SQLite.openDatabaseAsync("lockedin.db");
-  // Get all workouts sorted by date
-  const rows: any[] = await db.getAllAsync("SELECT * FROM workouts ORDER BY date ASC");
-  
-  return rows.map(row => ({
-    ...row,
-    sets: JSON.parse(row.sets)
-  }));
-}
-// Add to bottom of src/db/database.ts
-
-export async function getUniqueExercises(): Promise<string[]> {
-  const db = await SQLite.openDatabaseAsync("lockedin.db");
-  const rows: any[] = await db.getAllAsync("SELECT DISTINCT exercise FROM workouts");
-  return rows.map(r => r.exercise).filter(e => e); // Return array of strings
 }

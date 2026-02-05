@@ -96,7 +96,6 @@ export default function History() {
 
   useEffect(() => {
     (async () => {
-      await init();
       await load();
       setLoading(false);
     })();

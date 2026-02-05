@@ -65,7 +65,7 @@ export default function Workouts() {
   };
 
   useEffect(() => {
-    init().then(load);
+    load();
   }, []);
 
   useFocusEffect(
