@@ -9,64 +9,86 @@ import {
   StyleSheet,
   Alert,
 } from "react-native";
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { Picker } from "@react-native-picker/picker";
-import { getAllLogs, init, deleteLog } from "../../src/db/database"; // Added deleteLog
+import { 
+  getAllLogs, 
+  init, 
+  deleteLog, 
+  saveSetting, 
+  getSetting, 
+  getAllWorkoutsArray, 
+  deleteLog as deleteWorkoutLog, // Rename to avoid conflict if needed, though we track workouts differently
+  WorkoutLog 
+} from "../../src/db/database"; 
 import HistoryCard from "../../src/components/HistoryCard";
 import MetricChart from "../../src/charts/MetricChart"; 
-import LogModal from "../../src/components/LogModal"; // <--- Import Modal
+import LogModal from "../../src/components/LogModal"; 
+import GoalModal from "../../src/components/GoalModal"; 
 import { useFocusEffect } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
 
 const { width, height } = Dimensions.get("window");
 
 export default function History() {
-  const [mode, setMode] = useState<"weight" | "fat" | "muscle" | "all">("weight");
-  const [data, setData] = useState<any[]>([]);
+  const [viewMode, setViewMode] = useState<"body" | "workout">("body");
+  
+  // Body Stats State
+  const [metricMode, setMetricMode] = useState<"weight" | "fat" | "muscle" | "all">("weight");
+  const [bodyData, setBodyData] = useState<any[]>([]);
+  
+  // Workout Stats State
+  const [workoutData, setWorkoutData] = useState<WorkoutLog[]>([]);
+  const [selectedExercise, setSelectedExercise] = useState<string>("All");
+  const [availableExercises, setAvailableExercises] = useState<string[]>([]);
+
   const [loading, setLoading] = useState(true);
   const scrollRef = useRef<ScrollView | null>(null);
 
-  // Viewer State
+  // Modals
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerPhotos, setViewerPhotos] = useState<string[]>([]);
   const [viewerIndex, setViewerIndex] = useState(0);
-
-  // EDIT MODAL STATE
   const [editLog, setEditLog] = useState<any | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
-
-  const openViewer = (photos: string[], index = 0) => {
-    if (!photos || photos.length === 0) return;
-    setViewerPhotos(photos);
-    setViewerIndex(index);
-    setViewerOpen(true);
-  };
-
-  useEffect(() => {
-    if (viewerOpen) {
-      requestAnimationFrame(() => {
-        scrollRef.current?.scrollTo({
-          x: width * viewerIndex,
-          animated: false,
-        });
-      });
-    }
-  }, [viewerOpen]);
+  
+  const [targetWeight, setTargetWeight] = useState<number | null>(null);
+  const [isGoalOpen, setIsGoalOpen] = useState(false);
 
   const load = async () => {
     try {
-      const rows = await getAllLogs();
-      const sorted = rows.sort((a: any, b: any) => 
+      // 1. Load Body Logs
+      const logs = await getAllLogs();
+      const sortedLogs = logs.sort((a: any, b: any) => 
         new Date(a.date).getTime() - new Date(b.date).getTime()
       );
-
-      setData(
-        sorted.map((r: any) => ({
+      setBodyData(
+        sortedLogs.map((r: any) => ({
           ...r,
           photos: typeof r.photos === "string" 
             ? (() => { try { return JSON.parse(r.photos); } catch { return []; } })() 
             : [],
         }))
       );
+
+      // 2. Load Workouts
+      const workouts = await getAllWorkoutsArray();
+      setWorkoutData(workouts);
+
+      // Extract unique exercises
+      const uniqueEx = Array.from(new Set(workouts.map((w: any) => w.exercise))).sort();
+      // Add "All" option to the start
+      setAvailableExercises(["All", ...uniqueEx]);
+      
+      // Default to "All" if nothing selected
+      if (!selectedExercise) {
+        setSelectedExercise("All");
+      }
+
+      // 3. Load Goal
+      const savedGoal = await getSetting("target_weight");
+      if (savedGoal) setTargetWeight(parseFloat(savedGoal));
+
     } catch (e) {
       console.log(e);
     }
@@ -85,6 +107,51 @@ export default function History() {
       load();
     }, [])
   );
+
+  // --- HELPERS ---
+
+  // Prepare Chart Data
+  const chartData = useMemo(() => {
+    if (viewMode === "body") {
+      return bodyData;
+    } else {
+      if (selectedExercise === "All") return []; // No chart for "All"
+
+      const relevantWorkouts = workoutData.filter(w => w.exercise === selectedExercise);
+      return relevantWorkouts.map(w => {
+        const maxLift = Math.max(...w.sets.map((s: any) => s.weight || 0));
+        return {
+          date: w.date,
+          weight: maxLift,
+          bodyFat: 0, 
+          muscleMass: 0
+        };
+      });
+    }
+  }, [viewMode, bodyData, workoutData, selectedExercise, metricMode]);
+
+  // Group Workouts by Date for the "All" view
+  const groupedWorkouts = useMemo(() => {
+    if (viewMode !== "workout" || selectedExercise !== "All") return [];
+
+    const groups: { [key: string]: WorkoutLog[] } = {};
+    workoutData.forEach(log => {
+      if (!groups[log.date]) groups[log.date] = [];
+      groups[log.date].push(log);
+    });
+
+    // Convert to array and sort by date descending (newest first)
+    return Object.entries(groups)
+      .map(([date, logs]) => ({ date, logs }))
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [workoutData, viewMode, selectedExercise]);
+
+  const openViewer = (photos: string[], index = 0) => {
+    if (!photos || photos.length === 0) return;
+    setViewerPhotos(photos);
+    setViewerIndex(index);
+    setViewerOpen(true);
+  };
 
   const handleLongPress = (item: any) => {
     Alert.alert("Manage Log", `Options for ${item.date}`, [
@@ -107,6 +174,13 @@ export default function History() {
     ]);
   };
 
+  const saveGoal = async (val: string) => {
+    if(val) {
+      await saveSetting("target_weight", val);
+      setTargetWeight(parseFloat(val));
+    }
+  };
+
   if (loading) {
     return (
       <View style={styles.centerContainer}>
@@ -117,61 +191,180 @@ export default function History() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.headerTitle}>History</Text>
+      
+      {/* HEADER */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <Text style={styles.headerTitle}>History</Text>
+        {viewMode === "body" && (
+            <Pressable 
+            onPress={() => setIsGoalOpen(true)}
+            style={{ backgroundColor: '#1A1A1A', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16 }}
+            >
+            <Text style={{ color: '#4ADE80', fontSize: 12, fontWeight: '600' }}>
+                {targetWeight ? `Goal: ${targetWeight}kg` : "Set Goal"}
+            </Text>
+            </Pressable>
+        )}
+      </View>
 
-      <View style={styles.pickerContainer}>
-        <Picker
-          selectedValue={mode}
-          onValueChange={setMode}
-          dropdownIconColor="#EAEAEA"
-          style={{ color: "#EAEAEA", backgroundColor: "#1A1A1A" }}
-        >
-          <Picker.Item label="Weight" value="weight" />
-          <Picker.Item label="Body Fat %" value="fat" />
-          <Picker.Item label="Muscle Mass" value="muscle" />
-          <Picker.Item label="All" value="all" />
-        </Picker>
+      {/* DROPDOWNS */}
+      <View style={styles.splitDropdownContainer}>
+        <View style={[styles.pickerWrapper, { flex: 0.45 }]}>
+            <Picker
+                selectedValue={viewMode}
+                onValueChange={(v) => setViewMode(v)}
+                dropdownIconColor="#EAEAEA"
+                style={styles.picker}
+            >
+                <Picker.Item label="Body Stats" value="body" />
+                <Picker.Item label="Workouts" value="workout" />
+            </Picker>
+        </View>
+
+        <View style={[styles.pickerWrapper, { flex: 0.55 }]}>
+            {viewMode === "body" ? (
+                <Picker
+                    selectedValue={metricMode}
+                    onValueChange={setMetricMode}
+                    dropdownIconColor="#EAEAEA"
+                    style={styles.picker}
+                >
+                    <Picker.Item label="Weight" value="weight" />
+                    <Picker.Item label="Body Fat %" value="fat" />
+                    <Picker.Item label="Muscle Mass" value="muscle" />
+                    <Picker.Item label="All" value="all" />
+                </Picker>
+            ) : (
+                <Picker
+                    selectedValue={selectedExercise}
+                    onValueChange={setSelectedExercise}
+                    dropdownIconColor="#EAEAEA"
+                    style={styles.picker}
+                >
+                    {availableExercises.map(ex => (
+                        <Picker.Item key={ex} label={ex} value={ex} />
+                    ))}
+                </Picker>
+            )}
+        </View>
       </View>
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 20 }}>
-        {data.length > 1 ? (
-          <View style={{ marginBottom: 24, marginTop: 8 }}>
-            <MetricChart data={data} mode={mode} />
-          </View>
-        ) : (
-          <View style={{ padding: 20, alignItems: "center" }}>
-            <Text style={{ color: "#555" }}>Log more days to see the chart</Text>
-          </View>
+        
+        {/* CHART SECTION */}
+        {/* Only show chart if NOT in "All" workouts mode */}
+        {(viewMode === "body" || (viewMode === "workout" && selectedExercise !== "All")) && (
+            chartData.length > 1 ? (
+            <View style={{ marginBottom: 24, marginTop: 8 }}>
+                <MetricChart 
+                    data={chartData} 
+                    mode={viewMode === "workout" ? "weight" : metricMode} 
+                    targetWeight={viewMode === "body" ? targetWeight : null} 
+                />
+                {viewMode === "workout" && (
+                    <Text style={{color: '#666', textAlign: 'center', fontSize: 10, marginTop: -10}}>
+                        Plotting heaviest set per day
+                    </Text>
+                )}
+            </View>
+            ) : (
+            <View style={{ padding: 20, alignItems: "center" }}>
+                <Text style={{ color: "#555" }}>
+                    {viewMode === "workout" && !selectedExercise 
+                        ? "Log some workouts first" 
+                        : "Not enough data to chart"}
+                </Text>
+            </View>
+            )
         )}
 
-        {data.slice().reverse().map((item: any) => ( 
-          <HistoryCard
-            key={item.date}
-            date={item.date}
-            weight={item.weight}
-            bodyFat={item.bodyFat}
-            muscleMass={item.muscleMass}
-            photos={item.photos}
-            onPressPhoto={(i) => openViewer(item.photos, i)}
-            onLongPress={() => handleLongPress(item)}
-          />
-        ))}
+        {/* --- LIST SECTION --- */}
+        
+        {/* 1. BODY STATS LIST */}
+        {viewMode === "body" && (
+            bodyData.slice().reverse().map((item: any) => ( 
+            <HistoryCard
+                key={item.date}
+                date={item.date}
+                weight={item.weight}
+                bodyFat={item.bodyFat}
+                muscleMass={item.muscleMass}
+                photos={item.photos}
+                onPressPhoto={(i) => openViewer(item.photos, i)}
+                onLongPress={() => handleLongPress(item)}
+            />
+            ))
+        )}
+
+        {/* 2. WORKOUTS - "ALL" VIEW (Condensed Daily Summary) */}
+        {viewMode === "workout" && selectedExercise === "All" && (
+            groupedWorkouts.map((group) => (
+                <View key={group.date} style={styles.workoutCard}>
+                    {/* Header: Date */}
+                    <View style={{ borderBottomWidth: 1, borderBottomColor: '#333', paddingBottom: 8, marginBottom: 8, flexDirection: 'row', justifyContent: 'space-between' }}>
+                        <Text style={{ color: '#EAEAEA', fontSize: 16, fontWeight: 'bold' }}>{group.date}</Text>
+                        <Text style={{ color: '#888', fontSize: 12 }}>{group.logs.length} Exercises</Text>
+                    </View>
+                    
+                    {/* List of Exercises for that day */}
+                    {group.logs.map((log) => {
+                        // Find best set for summary
+                        const bestSet = log.sets.reduce((prev, current) => (prev.weight > current.weight) ? prev : current, { weight: 0, reps: 0 });
+                        
+                        return (
+                            <View key={log.id} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                                <Text style={{ color: '#CCC', fontSize: 14 }}>{log.exercise}</Text>
+                                <Text style={{ color: '#4ADE80', fontSize: 14 }}>
+                                    {bestSet.weight}kg × {bestSet.reps} <Text style={{color:'#666', fontSize:12}}>(Top Set)</Text>
+                                </Text>
+                            </View>
+                        );
+                    })}
+                </View>
+            ))
+        )}
+
+        {/* 3. WORKOUTS - SINGLE EXERCISE VIEW */}
+        {viewMode === "workout" && selectedExercise !== "All" && (
+            workoutData
+                .filter(w => w.exercise === selectedExercise)
+                .slice().reverse()
+                .map((item) => (
+                    <View key={item.id} style={styles.workoutCard}>
+                        <View style={{flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8}}>
+                             <Text style={{color: '#EAEAEA', fontSize: 16}}>{item.date}</Text>
+                             <Ionicons name="fitness" size={16} color="#4ADE80" />
+                        </View>
+                        <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 8}}>
+                            {item.sets.map((set, i) => (
+                                <View key={i} style={styles.setTag}>
+                                    <Text style={{color: '#AAA', fontSize: 12}}>
+                                        {set.weight}kg × {set.reps}
+                                    </Text>
+                                </View>
+                            ))}
+                        </View>
+                    </View>
+                ))
+        )}
+
       </ScrollView>
 
-      {/* EDIT MODAL - Hidden until "Edit" is pressed */}
+      {/* MODALS */}
       <LogModal 
         visible={isEditOpen}
-        onClose={() => {
-          setIsEditOpen(false);
-          setEditLog(null);
-        }}
-        onSaved={() => {
-          load();
-        }}
+        onClose={() => { setIsEditOpen(false); setEditLog(null); }}
+        onSaved={load}
         existingLog={editLog}
       />
 
-      {/* PHOTO VIEWER MODAL */}
+      <GoalModal 
+        visible={isGoalOpen}
+        onClose={() => setIsGoalOpen(false)}
+        onSave={saveGoal}
+        currentValue={targetWeight ? String(targetWeight) : ""}
+      />
+
       <Modal
         visible={viewerOpen}
         transparent={true}
@@ -224,13 +417,42 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: "#EAEAEA",
     fontSize: 22,
-    marginBottom: 12,
+    fontWeight: "bold"
   },
-  pickerContainer: {
-    marginBottom: 10,
+  splitDropdownContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 16,
+  },
+  pickerWrapper: {
     backgroundColor: "#1A1A1A",
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#333",
+    height: 50,
+    justifyContent: 'center',
     overflow: "hidden",
+  },
+  picker: {
+    color: "#EAEAEA",
+    backgroundColor: "transparent",
+    marginLeft: -8, 
+  },
+  workoutCard: {
+    backgroundColor: '#1A1A1A',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#4ADE80'
+  },
+  setTag: {
+    backgroundColor: '#222',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#333'
   },
   modalBackground: {
     flex: 1,
